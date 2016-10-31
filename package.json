@@ -1,0 +1,14 @@
+{
+  "name": "git-tag-updater",
+  "version": "0.0.1",
+  "license": "MIT",
+  "description": "Update script for tag based versioning",
+  "repo": "https://github.com/romainbessugesmeusy/git-tag-updater",
+  "dependencies": {
+    "async": "^2.1.2",
+    "cli": "^1.0.1",
+    "extend": "^3.0.0",
+    "inquirer": "^1.2.2",
+    "mkdirp": "^0.5.1"
+  }
+}

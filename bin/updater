@@ -1,0 +1,152 @@
+#!/usr/bin/env node
+
+var cli = require('cli');
+var extend = require('extend');
+var mkdirp = require('mkdirp');
+var async = require('async');
+var inquirer = require('inquirer');
+var exec = require('child_process').exec;
+var path = require('path');
+var fs = require('fs');
+
+var defaults = require('../defaults.json');
+
+var options = cli.parse({
+    tag: ['t', 'Specific tag to checkout', 'string'],
+    symlinks: ['s', 'Create symlinks "relativePath -> absolutePath" separated by semicolons', 'file', defaults.symlinks],
+    repo: ['r', 'Repository URL', 'string', defaults.repo],
+    dir: ['d', 'Working directory', 'string', defaults.dir],
+    install: ['i', 'Install project dependencies', 'boolean', defaults.install],
+    rollout: ['rollout', 'Roll out the tag in production', 'boolean', false],
+    stage: ['stage', 'Roll out the tag in production', 'boolean', false]
+});
+
+cli.info('Working directory is set to: ' + options.dir);
+cli.info('Git repository is: ' + options.repo);
+
+function askForTag(cb) {
+
+    if (options.tag) {
+        return cb();
+    }
+
+    exec('git ls-remote --refs --tags ' + options.repo, function (err, stdout, stderr) {
+        var tags = stdout.split('\n').map(function (line) {
+            return line.substr(line.lastIndexOf('/') + 1)
+        }).filter(function (line) {
+            return (line !== '')
+        });
+
+        inquirer.prompt(
+            {
+                type: 'list',
+                name: 'tag',
+                message: 'Which tag do you want to checkout?',
+                choices: tags
+            }
+        ).then(function (answer) {
+            options.tag = answer.tag;
+            cli.ok('Tag selected: ' + options.tag);
+            cb();
+        });
+    });
+}
+
+function run() {
+    async.series([
+        askForTag,
+        checkIfDirectoryExists,
+        cloneRepository,
+        checkoutTag,
+        createSymlinks,
+        installDependencies,
+        stage,
+        rollout
+    ], function () {
+        process.chdir(__dirname);
+    });
+}
+
+function checkIfDirectoryExists(cb) {
+    options.repoDir = path.join(options.dir, options.tag);
+    var gitDir = path.join(options.repoDir, '.git');
+    fs.stat(gitDir, function (err) {
+        options.directoryExists = !(err && err.code === 'ENOENT');
+        cb();
+    });
+}
+
+function cloneRepository(cb) {
+    cli.spinner('Cloning repository');
+    exec('git clone ' + options.repo + ' ' + path.join(options.repoDir), function (err, stdout, stderr) {
+        if (err || stderr) {
+            cli.spinner('Existing repository', true);
+        } else {
+            cli.spinner('Repository cloned', true);
+        }
+        cb();
+    });
+}
+
+function checkoutTag(cb) {
+    cli.spinner('Checking out tag: ' + options.tag);
+    exec('cd ' + options.repoDir + ' && git checkout tags/' + options.tag + ' -b ' + options.tag,
+        function () {
+            cli.spinner('Checked out', true);
+            cb();
+        });
+}
+
+function createSymlinks(cb) {
+
+    var symlinks = options.symlinks.split(';').map(function (entry) {
+        return entry.trim();
+    });
+    cli.info('Creating symlinks ');
+
+    async.each(symlinks, function (symlink, symlinkCb) {
+        var parts = symlink.split('->');
+        var relativePath = parts[0];
+        var absolutePath = parts[1];
+        var cmd = 'ln -s ' + absolutePath + ' ' + path.join(options.repoDir, relativePath);
+        cli.info('Created symlink: ' + relativePath + ' -> ' + absolutePath + ' OK');
+        exec(cmd, symlinkCb)
+    }, function () {
+        cb();
+    });
+}
+
+function installDependencies(cb) {
+    if (!options.install) {
+        return cb();
+    }
+
+    cli.spinner('Installing dependencies');
+    exec('cd ' + options.repoDir + ' && npm install --production', function (err, stdout, stderr) {
+        cli.spinner('Installing dependencies OK', true);
+        cb();
+    });
+}
+
+function stage(cb) {
+    if (!options.stage) {
+        return cb();
+    }
+    symlinkDir('staging', cb);
+}
+
+function rollout(cb) {
+    if (!options.rollout) {
+        return cb();
+    }
+    symlinkDir('production', cb);
+}
+
+function symlinkDir(dirname, cb) {
+    var cmd = 'cd ' + options.dir + ' && rm -f ' + dirname + ' && ln -s ' + options.tag + ' ' + dirname;
+    exec(cmd, function () {
+        cli.info('Created symlink: ' + dirname);
+        cb();
+    })
+}
+run();
