@@ -1,6 +1,6 @@
 {
   "name": "git-tag-updater",
-  "version": "0.0.1",
+  "version": "1.0.0",
   "license": "MIT",
   "description": "Update script for tag based versioning",
   "repository": "https://github.com/romainbessugesmeusy/git-tag-updater",
