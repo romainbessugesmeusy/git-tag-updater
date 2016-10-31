@@ -168,11 +168,7 @@ function installDependencies(cb) {
     cli.spinner('Installing dependencies');
     cli.debug(cmd);
     exec(cmd, function (err, stdout, stderr) {
-        if(stderr || err){
-            cli.spinner('Installing dependencies', true);
-            cli.error(stderr);
-            cli.fatal('Script errored when installing NPM dependencies');
-        }
+        //todo find a way to parse npm install stdout / stderr
         cli.spinner('Installing dependencies OK', true);
         cb();
     });
