@@ -1,6 +1,0 @@
-{
-  "symlinks": "dist/data -> /mnt/nfs/ftp/data",
-  "repo": "https://github.com/username/public-repository",
-  "dir": "/var/www/my-project",
-  "install": true
-}

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-var cli = require('cli');
+var cli = require('cli').enable('status');
 var extend = require('extend');
 var mkdirp = require('mkdirp');
 var async = require('async');
@@ -9,20 +9,34 @@ var exec = require('child_process').exec;
 var path = require('path');
 var fs = require('fs');
 
-var defaults = require('../defaults.json');
+function getDefaultHome() {
+    var ROOT_PATH;
+
+    if (process.env.GTU_HOME)
+        ROOT_PATH = process.env.GTU_HOME;
+    else if (process.env.HOME && !process.env.HOMEPATH)
+        ROOT_PATH = path.resolve(process.env.HOME, '.gtu');
+    else if (process.env.HOME || process.env.HOMEPATH)
+        ROOT_PATH = path.resolve(process.env.HOMEDRIVE, process.env.HOME || process.env.HOMEPATH, '.gtu');
+    else {
+        console.error('[GTU][Initialization] Environment variable HOME (Linux) or HOMEPATH (Windows) are not set!');
+        console.error('[GTU][Initialization] Defaulting to /etc/.pm2');
+        ROOT_PATH = path.resolve('/etc', '.pm2');
+    }
+
+    return ROOT_PATH;
+}
 
 var options = cli.parse({
-    tag: ['t', 'Specific tag to checkout', 'string'],
-    symlinks: ['s', 'Create symlinks "relativePath -> absolutePath" separated by semicolons', 'file', defaults.symlinks],
-    repo: ['r', 'Repository URL', 'string', defaults.repo],
-    dir: ['d', 'Working directory', 'string', defaults.dir],
-    install: ['i', 'Install project dependencies', 'boolean', defaults.install],
-    rollout: ['rollout', 'Roll out the tag in production', 'boolean', false],
-    stage: ['stage', 'Roll out the tag in production', 'boolean', false]
-});
+    tag: ['t', 'Specific tag to checkout', 'string']
+}, [
+    'checkout',
+    'rollout',
+    'stage',
+    'init'
+]);
 
-cli.info('Working directory is set to: ' + options.dir);
-cli.info('Git repository is: ' + options.repo);
+
 
 function askForTag(cb) {
 
@@ -46,24 +60,46 @@ function askForTag(cb) {
             }
         ).then(function (answer) {
             options.tag = answer.tag;
-            cli.ok('Tag selected: ' + options.tag);
             cb();
         });
     });
 }
 
+function getLocalFilenameForConfigId(id) {
+    return path.join(getDefaultHome(), id + '.json');
+}
+
 function run() {
-    async.series([
-        askForTag,
-        checkIfDirectoryExists,
-        cloneRepository,
-        checkoutTag,
-        createSymlinks,
-        installDependencies,
-        stage,
-        rollout
-    ], function () {
-        process.chdir(__dirname);
+
+    if (cli.args.length !== 1) {
+        return cli.fatal('Missing configuration argument');
+    }
+
+    var configId = cli.args[0];
+
+    fs.readFile(getLocalFilenameForConfigId(configId), 'utf8', function (err, content) {
+        if (err) {
+            return cli.fatal('Configuration file missing');
+        }
+        var config = JSON.parse(content);
+
+        options = extend(config, options);
+
+        cli.info('Working directory is set to: ' + options.dir);
+        cli.info('Git repository is: ' + options.repo);
+
+        async.series([
+            askForTag,
+            checkIfDirectoryExists,
+            cloneRepository,
+            checkoutTag,
+            createSymlinks,
+            installDependencies,
+            stage,
+            rollout
+        ], function () {
+            process.chdir(__dirname);
+        });
     });
 }
 
@@ -77,22 +113,22 @@ function checkIfDirectoryExists(cb) {
 }
 
 function cloneRepository(cb) {
-    cli.spinner('Cloning repository');
+    cli.spinner('\tCloning repository');
     exec('git clone ' + options.repo + ' ' + path.join(options.repoDir), function (err, stdout, stderr) {
         if (err || stderr) {
-            cli.spinner('Existing repository', true);
+            cli.spinner('\t↻ Cloning repository', true);
         } else {
-            cli.spinner('Repository cloned', true);
+            cli.spinner('\t↻ Cloning repository', true);
         }
         cb();
     });
 }
 
 function checkoutTag(cb) {
-    cli.spinner('Checking out tag: ' + options.tag);
+    cli.spinner('\tChecking out tag: ' + options.tag);
     exec('cd ' + options.repoDir + ' && git checkout tags/' + options.tag + ' -b ' + options.tag,
         function () {
-            cli.spinner('Checked out', true);
+            cli.spinner('\t↻ Checked out', true);
             cb();
         });
 }
@@ -102,6 +138,7 @@ function createSymlinks(cb) {
     var symlinks = options.symlinks.split(';').map(function (entry) {
         return entry.trim();
     });
+
     cli.info('Creating symlinks ');
 
     async.each(symlinks, function (symlink, symlinkCb) {
@@ -109,7 +146,8 @@ function createSymlinks(cb) {
         var relativePath = parts[0];
         var absolutePath = parts[1];
         var cmd = 'ln -s ' + absolutePath + ' ' + path.join(options.repoDir, relativePath);
-        cli.info('Created symlink: ' + relativePath + ' -> ' + absolutePath + ' OK');
+        console.info('\t• ' + relativePath + ' -> ' + absolutePath);
+        cli.debug(cmd);
         exec(cmd, symlinkCb)
     }, function () {
         cb();
@@ -117,26 +155,38 @@ function createSymlinks(cb) {
 }
 
 function installDependencies(cb) {
-    if (!options.install) {
+    if (options.npm_install === 'none') {
         return cb();
     }
 
+    var cmd = 'cd ' + options.repoDir + ' && npm install';
+
+    if (options.npm_install === 'production') {
+        cmd += ' --production';
+    }
+
     cli.spinner('Installing dependencies');
-    exec('cd ' + options.repoDir + ' && npm install --production', function (err, stdout, stderr) {
+    cli.debug(cmd);
+    exec(cmd, function (err, stdout, stderr) {
+        if(stderr || err){
+            cli.spinner('Installing dependencies', true);
+            cli.error(stderr);
+            cli.fatal('Script errored when installing NPM dependencies');
+        }
         cli.spinner('Installing dependencies OK', true);
         cb();
     });
 }
 
 function stage(cb) {
-    if (!options.stage) {
+    if (cli.command !== 'stage') {
         return cb();
     }
     symlinkDir('staging', cb);
 }
 
 function rollout(cb) {
-    if (!options.rollout) {
+    if (cli.command !== 'rollout') {
         return cb();
     }
     symlinkDir('production', cb);
@@ -149,4 +199,46 @@ function symlinkDir(dirname, cb) {
         cb();
     })
 }
-run();
+
+if (cli.command === 'init') {
+    init();
+} else {
+    run();
+}
+
+function init() {
+    var questions = [{
+        type: 'input',
+        name: 'repo',
+        message: 'Repository URL'
+    }, {
+        type: 'input',
+        name: 'dir',
+        message: 'Working directory'
+    }, {
+        type: 'input',
+        name: 'symlinks',
+        message: 'Symlinks "relative ->  absolute" separated by semicolons'
+    }, {
+        type: 'input',
+        name: 'id',
+        message: 'Configuration ID'
+    }, {
+        type: 'list',
+        name: 'npm_intall',
+        message: 'NPM install',
+        choices: ['none', 'production', 'dev']
+    }];
+
+    inquirer.prompt(questions).then(function (answers) {
+        var configurationFilename = getLocalFilenameForConfigId(answers.id);
+        mkdirp(path.join(process.env.HOME, '.gtu'), function () {
+            fs.writeFile(configurationFilename, JSON.stringify(answers, null, 2), function (err) {
+                if (err) {
+                    cli.fatal(err);
+                }
+                cli.ok('Wrote ' + configurationFilename);
+            });
+        })
+    });
+}
