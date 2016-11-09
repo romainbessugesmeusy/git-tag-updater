@@ -20,8 +20,8 @@ function getDefaultHome() {
         ROOT_PATH = path.resolve(process.env.HOMEDRIVE, process.env.HOME || process.env.HOMEPATH, '.gtu');
     else {
         console.error('[GTU][Initialization] Environment variable HOME (Linux) or HOMEPATH (Windows) are not set!');
-        console.error('[GTU][Initialization] Defaulting to /etc/.pm2');
-        ROOT_PATH = path.resolve('/etc', '.pm2');
+        console.error('[GTU][Initialization] Defaulting to /etc/.gtu');
+        ROOT_PATH = path.resolve('/etc', '.gtu');
     }
 
     return ROOT_PATH;
